@@ -106,3 +106,9 @@ Please view the [License](LICENSE) for limitations of liability.
 
 ## reference
 https://github.com/ScaleSec/terraform_aws_scp
+
+Useful references for AWs config Rules:
+https://github.com/cloudposse/terraform-aws-config/blob/master/main.tf
+https://github.com/trussworks/terraform-aws-config
+https://awesomeopensource.com/project/trussworks/terraform-aws-config
+
