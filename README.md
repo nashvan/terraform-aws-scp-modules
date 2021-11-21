@@ -1,115 +1,105 @@
-# Terraform AWS Orgs Guardrails
+# Terraform AWS Service Control Policies
 
-## Service Control Policies (SCPs)
+[![GitHub Super-Linter](https://github.com/ScaleSec/terraform_aws_scp/workflows/Lint%20Code%20Base/badge.svg)](https://github.com/marketplace/actions/super-linter)
 
-The following SCPs should only be applied after the account has been configured properly. The pre-configuration includes all security tools and IAM permissions. The recommended best practice is to create an onboarding Organizational Unit (OU) that has limited permissions to deploy your tools and then move the account into an OU that has the security guardrails attached.
+This repo is a collection of AWS Service Control Policies (SCPs) written in Hashicorp Terraform to be used in AWS Organizations.
 
-## Security Guardrails
+## About Service Control Policies
 
-### Account
+- For official documentation about SCPs, visit the links [here](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scp.html) and [here.](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_about-scps.html)
+- SCPs enable you to restrict, at the account level of granularity, what services and actions the users, groups and roles in those accounts can do.
+- SCPs are available only in an organization that has all features enabled. SCPs aren't available if your organization has enabled only the consolidated billing features.
 
-- [deny_region_interaction.tf](./modules/account/deny_region_interaction.tf) - Denies the ability to enable or disable a region.
-  - By default, when new regions are enabled by AWS, you now have to enable that region before IAM will propagate.
-  - This policy can be used to lock down the ability to launch resources in unapproved regions or deny a malicious actor from disabling a region in your account.
-  - *Important*: When a region is disabled, and there are IAM resources in that region, they will be removed. Please view the documentation [here](https://aws.amazon.com/blogs/security/setting-permissions-to-enable-accounts-for-upcoming-aws-regions/) for more information.
+## Considerations
 
-### AI Services
+- Best practice is to never attach SCPs to the root of your organization. Instead, create an Organizational Unit (OU) underneath root and attach policies there.
+- SCPs do not grant permissions in IAM but instead allow/deny services or set security guardrails.
+- Root user accounts are affected by SCPs.
+- You must have at least one SCP attached to each entity.
+- Maximum of 5 SCPs can be attached to the root, OU, or Account in an organization.
 
-- [ai_services_opt_out.tf](./modules/ai/ai_services_opt_out.tf) - Opts out of sharing customer content processed by Amazon CodeGuru Profiler, Amazon Comprehend, Amazon Lex, Amazon Polly, Amazon Rekognition, Amazon Textract, Amazon Transcribe, and Amazon Translate for the development and continuous improvement of Amazon AI services and technologies.
-  - This policy opts out of all services and does not allow child policies to opt in.
-  - Please review the documentation [here](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_ai-opt-out_syntax.html) on how to selectively opt in to data sharing.
-  - Prior to applying, ensure that the AI services opt-out policy type is enabled for the organization.
+### Permission Logic
 
-### Amazon Comprehend
+- If a user or role has an IAM permission policy that grants access to an action that is also allowed by the applicable SCPs, the user or role can perform that action.
+- If a user or role has an IAM permission policy that grants access to an action that is either not allowed or explicitly denied by the applicable SCPs, the user or role can't perform that action.
+- AWS Organizations use a tree hierarchy for SCPs. This means that if your account is in an Organizational Unit, it inherits that OUs policies.
+- From the documentation:
 
-- [require_kms_cmks.tf](./modules/comprehend/require_kms_cmks.tf) - Requires all applicable Amazon Comprehend calls to pass in an Amazon Key Management Service (KMS) customer managed key (CMK). Per the [documentation](https://docs.aws.amazon.com/comprehend/latest/dg/kms-in-comprehend.html), _Amazon Comprehend can encrypt custom models using either its own KMS Key or a provided customer managed key (CMK)._ You can find a comparison of the two keys [here](https://docs.aws.amazon.com/whitepapers/latest/kms-best-practices/aws-managed-and-customer-managed-cmks.html), and CMKs provide greater control over your encyption keys.
-- [require_private_vpcs.tf](./modules/comprehend/require_private_vpcs.tf) - Amazon Comprehend supports running the job containers in a customer managed VPC. A VPC can be configured to not be exposed to internet, allows users to monitor networking traffic using flow logs, and can route traffic over private networks with VPC endpoints.
-  - When Amazon Comprehend jobs are launched in a VPC, Amazon Comprehend creates Elastic Network Interfaces (ENIs) and attached them to the job containers. The ENIs provide network connectivity within the VPC.
+![alt text](https://docs.aws.amazon.com/organizations/latest/userguide/images/How_SCP_Permissions_Work.png "SCP Venn Diagram")
 
-### AWS Config
+## Content
 
-- [deny_interruption_actions.tf](./modules/awsconfig/deny_interruption_actions.tf) - Denies the ability to delete AWS Config rules and stop recording.
-  - AWS Config is a service to monitor your resources for point-in-time configuration updates and compliance monitoring.
-  - Malicious actors may try to stop AWS Config recording and perform destructive behavior so it is important to deny AWS Config deletions.
+- The [security_controls_scp](security_controls_scp/) folder is a modularized grouping of AWS Security Best Practices to control at the AWS Organizations level.
+  - __NOTICE:__ Due to the limitations of Service Control Policies, only a max of 5 may be attached at one time. With that in mind, you cannot apply ALL of the security controls at once (in their current modularized format). All of the SCPs will attempt to attach to one target ID and will fail. You have a couple of options:
+    - Select the `aws_iam_policy_document` you want and combine into one large data document.
+    - Pick and choose 5 modules to deploy and remove the others.
+    - Remove `aws_organizations_policy_attachment` from the modules' `main.tf` file and apply. You would then need to manually attach the SCPs.
+- The [compliance_scp](compliance_scp/) folder is a collection of compliance-flavored SCPs. These SCPs only allow AWS services that are compliant with the respective compliance framework. All SCP JSON files are sourced from Salesforce's [aws-allowlister](https://github.com/salesforce/aws-allowlister) repository which updates via a weekly cronjob.
 
-### AWS Organizations
 
-- [deny_orgs_leave.tf](./modules/organizations/deny_orgs_leave.tf) - Denies the ability to remove an account from the AWS Organization it is assigned to.
+## Usage
 
-### AWS Shield
+An example main.tf for the module to deny the ability to delete CloudTrail Trails:
 
-- [deny_shield_removal.tf](./modules/shield/deny_shield_removal.tf) - Denies the ability to remove AWS Shield protection or update the emergency contact information.
-  - AWS Shield is a DDoS protection service which should be turned on 24/7.
+```hcl
+module "cloudtrail" {
+  source      = "./modules/cloudtrail"
 
-### CloudTrail
+  target_id = "123456789012"
+  aws_region = "us-east-1"
+  shared_credentials_file = "~/.aws/credentials"
+  customprofile = "default"
+}
+```
+### Deployment
 
-- [deny_cloudtrail_actions.tf](./modules/cloudtrail/deny_cloudtrail_actions.tf) - Denies the ability to delete or manipulate CloudTrail trails.
-  - CloudTrail monitors all API calls against (supported) resources.
-  - Please note that not all AWS services and resources are supported by CloudTrail.
-  - Because CloudTrail is a record of all API calls made, it is commonly targeted to cover malicious actors' tracks.
+To Deploy all of the AWS security best practice SCPs navigate to [__security_controls_scp__](./security_controls_scp):
+- `terraform init` to get the plugins.
+- `terraform plan` to verify your resource planning.
+- `terraform apply` to apply your SCPs.
 
-### EC2
+You will receive an error related similar to `ConstraintViolationException: You have attached the maximum number of policies to the specified target.` when you deploy ALL of the security related SCPs. We recommend only deploying the SCPs you need by leveraging the `-target` flag in your `terraform apply` command. An example command to deploy only the S3 and Lambda SCPs is below:
+- `terraform apply -target=module.s3 -target=module.lambda`
 
-- [require_mfa_actions.tf](./modules/ec2/require_mfa_actions.tf) - Requires MFA when deleting or stopping EC2 instances.
-  - A best practice is to protect your resources from accidental deletions and requiring MFA is one step in that direction.
-- [restrict_ami_owner.tf](./modules/ec2/restrict_ami_owner.tf) - Locks down the AMIs that can be launched to only the AMI creation account.
-  - A common practice is to configure an AWS account for centralized AMI creations that you then share to the receiving accounts. Similar to a hub-and-spoke model.
-- [require_ami_tag.tf](./modules/ec2/require_ami_tag.tf) - Requires a resource tag key/value pair to launch EC2s.
-  - Requiring a specific resource tag key/value pair on an AMI in order to launch an EC2 instance is a form of ABAC (Attribute-Based Access Control). ABAC is a powerful access control configuration that AWS is supporting more and more with updates. For an in-depth breakdown of ABAC, visit this [tutorial](https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_attribute-based-access-control.html). Combining ABAC in the form of a resource tag and locking down AMIs to only specific owners/account IDs allows you to put different security checks in place for a layered approach.
-- [deny_public_ami.tf](./modules/ec2/deny_public_ami.tf) - Denies the ability for users to deploy EC2 instances with public AMIs
-  - A lot of organizations have their own internal AMIs with pre-baked security agents and other applications. If users have the ability to launch EC2s with public AMIs, they can circumvent the security tools. This SCP requires users to use private AMIs that are custom built (normally).
-- [require_imdsv2.tf](./modules/ec2/require_imdsv2.tf) - Requires the use of IMDSv2 for all newly launched EC2 instances.
-  - Be aware that if you use Auto Scaling groups you must use launch templates and NOT launch configurations. There are other requirements noted [here.](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ExamplePolicies_EC2.html#iam-example-instance-metadata)
-- [imdsv2_max_hop.tf](./modules/ec2/imdsv2_max_hop.tf) - Limits the amount of hops an IMDSv2 token can make.
-  - IMDSv2 switches from a `request/response method` to a `session-oriented method` which requires a token be generated and specified to interact with the metadata service on EC2 instances. You are able to set a maximum hop limit to keep tokens only on the EC2 where they were generated. There may be times where you need a higher hop limit, but the default is set to 1.
+To Remove the SCPs:
+- `terraform destroy` to destroy the deployed policies.
 
-### EFS
+### Deployment Dependencies
 
-- [deny_unencrypted_efs_actions.tf](./modules/efs/deny_unencrypted_efs_actions.tf) - Requires encryption at rest for EFS resources.
-  - This SCP will deny the creation of an Elastic File System when encryption at rest has not been enabled.
+- [Terraform v12](https://www.terraform.io/downloads.html)
+- [terraform-provider-aws](https://github.com/terraform-providers/terraform-provider-aws)
+- An AWS Organization
+- An IAM user with Organization Admin Access
 
-### GuardDuty
+## Common Errors
 
-- [deny_guardduty_disassociate.tf](./modules/guardduty/deny_guardduty_disassociate.tf) - Denies the ability to remove the assigned account from the GuardDuty master.
-  - Once GuardDuty is in place for an account, it should not be removed while in use.
+#### Enabled Policy Types
 
-### IAM
+```
+error creating Organizations Policy Attachment: PolicyTypeNotEnabledException: This operation can be performed only for enabled policy types.
+status code: 400, request id: 2b8ecgeb-34h3-11e6-86fb-275c76986dec
+```
 
-- [deny_actions_no_mfa.tf](./modules/iam/deny_actions_no_mfa.tf) - Requires MFA to be set before any action can be performed.
-  - The user will only be able to set a MFA device and then must log out / in to have normal access.
-  - This is a blanket guardrail that should be used cautiously. Keep in mind that unless the user authenticated with MFA via the CLI, access keys will not be valid.
+SCP functionality must be enabled on the root.  See https://github.com/terraform-providers/terraform-provider-aws/issues/4545 for more information
 
-### Lambda
+#### Minimum SCP Requirement
 
-- [require_vpc_lambda.tf](./modules/lambda/require_vpc_lambda.tf) - Requires lambda functions to be deployed in a customer-managed VPC.
-  - Use this SCP with caution as you need to have enough IPs available in your subnets. In addition, if the lambda needs to reach out to the internet, you also need to configure outbound access in your VPC.
+```
+aws_organizations_policy_attachment.deny_orgs_leave_attachment: ConstraintViolationException: You cannot remove the last policy attached to the specified target. You must have at least one attached at all times.
+status code: 400, request id: 2d6c75b3-5757-13e9-ab76-518b756aebd3
+```
 
-### RDS
+You must have one SCP attached to an account or OU at all times. See: https://docs.aws.amazon.com/organizations/latest/userguide/orgs_reference_limits.html for more information.
 
-- [deny_unencrypted_actions.tf](./modules/rds/deny_unencrypted_actions.tf) - Deny RDS actions that do not specify encryption flags
-  - This SCP covers all RDS actions that support encryption and denies if the user does not specify encryption for the resource.
+#### Conflicting Policy Attachment
 
-### Region
+```
+error creating Organizations Policy Attachment: ConcurrentModificationException: AWS Organizations can't complete your request because it conflicts with another attempt to modify the same entity. Try again later. status code: 400, request id: h725f9g7-1234-12e9-h746-ch123ab12345
+```
 
-- [region_restriction.tf](./modules/region/region_restriction.tf) - Restricts the region(s) where AWS non-global services APIs can be invoked. Update the variables file [here](https://github.com/ScaleSec/terraform_aws_scp/blob/master/security_controls_scp/variables.tf). More information on this SCP can be found [here](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_examples_aws_deny-requested-region.html).
+Occasionally, if you try to assign many SCPs to one target at the same time, it could error out. If you see this error simply run `terraform apply` again.
 
-### S3
+## Limitation of Liability
 
-- Recommended best practice is to encrypt everything in s3. These rules require encryption at rest and in transit.
-    - [deny_unencrypted_uploads.tf](./modules/s3/deny_unencrypted_uploads.tf) - Requires all S3 Uploads to use Encryption at Rest.
-    - [deny_unsecure_requests.tf](./modules/s3/deny_unsecure_requests.tf) - Denies non-TLS S3 Requests
-- [require_mfs_delete.tf](./modules/s3/require_mfs_delete.tf) - Requires MFA When Deleting Objects
-- [deny_public_access_points.tf](./modules/s3/deny_public_access_points.tf) - Denies the creation of publicly facing [Access Points](https://aws.amazon.com/s3/features/access-points/).
-- [s3_region_lockdown.tf](./modules/s3/s3_region_lockdown.tf) - Restricts the region(s) where S3 buckets can be created. Update the variables file [here](https://github.com/ScaleSec/terraform_aws_scp/blob/master/security_controls_scp/variables.tf).
+Please view the [License](LICENSE) for limitations of liability.
 
-### SageMaker
-
-- [require_vpc_domain.tf](./modules/sagemaker/require_vpc_domain.tf) - Requires all SageMaker domains to be configured for VPC only upon creation. The two available options are `PublicInternetOnly` and `VpcOnly`.
-- [deny_direct_internet_notebook.tf](./modules/sagemaker/deny_direct_internet_notebook.tf) - Requires all SageMaker notebooks to access to internet via a customer-owned VPC. The default configuration is to leverage the SageMaker owned VPC network.
-- [require_inter_encryption.tf](./modules/sagemaker/require_inter_encryption.tf) - Requires all communication between containers to be encrypted. This SCP may not be recommended for all job types. Per the [docs](https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_NetworkConfig.html#sagemaker-Type-NetworkConfig-EnableInterContainerTrafficEncryption): "Encryption provides greater security for distributed processing jobs, but the processing might take longer."
-- [deny_root_access.tf](./modules/sagemaker/deny_root_access.tf) - Denies the ability for users to have root access to SageMaker Notebook instances. An important note from the [docs](https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_CreateNotebookInstance.html#sagemaker-CreateNotebookInstance-request-RootAccess): "Lifecycle configurations need root access to be able to set up a notebook instance. Because of this, lifecycle configurations associated with a notebook instance always run with root access even if you disable root access for users."
-
-### VPC
-
-- [deny_flow_logs_delete.tf](./modules/vpc/deny_flow_logs_delete.tf) - Denies the ability to delete VPC Flow Logs.
-  - VPC Flow Logs are your network monitoring logs and provide visibility into anomalous traffic during a security event.
