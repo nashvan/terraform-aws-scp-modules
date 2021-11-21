@@ -103,3 +103,6 @@ Occasionally, if you try to assign many SCPs to one target at the same time, it 
 
 Please view the [License](LICENSE) for limitations of liability.
 
+
+## reference
+https://github.com/ScaleSec/terraform_aws_scp
